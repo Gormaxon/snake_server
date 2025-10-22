@@ -46,7 +46,7 @@ class GameRoom {
             username: username,
             color: color,
             darkerColor: color + '99',
-            x: Math.random() * 1920, // Will be set properly on game start
+            x: Math.random() * 1920,
             y: Math.random() * 1080,
             angle: Math.random() * Math.PI * 2,
             segments: [],
@@ -89,7 +89,6 @@ io.on('connection', (socket) => {
     // ===== CREATE ROOM (HOST) =====
     socket.on('createRoom', (data) => {
         let roomCode;
-        // Generate unique room code
         do {
             roomCode = generateRoomCode();
         } while (rooms.has(roomCode));
@@ -138,7 +137,6 @@ io.on('connection', (socket) => {
         
         console.log(`👋 ${data.username} joined room ${roomCode}`);
         
-        // Notify player who just joined
         socket.emit('roomJoined', {
             code: roomCode,
             isHost: socket.id === room.hostId,
@@ -147,7 +145,6 @@ io.on('connection', (socket) => {
             maxPlayers: room.maxPlayers
         });
         
-        // Notify all OTHER players in room
         socket.to(roomCode).emit('playerJoined', {
             players: room.getPlayersData(),
             newPlayerId: socket.id,
@@ -155,7 +152,7 @@ io.on('connection', (socket) => {
         });
     });
     
-    // ===== START GAME (Host only) =====
+    // ===== START GAME =====
     socket.on('startGame', () => {
         const roomCode = socket.currentRoom;
         const room = rooms.get(roomCode);
@@ -167,7 +164,10 @@ io.on('connection', (socket) => {
             return;
         }
         
-        // Removed minimum player requirement - can start with any number
+        if (room.getPlayerCount() < 2) {
+            socket.emit('error', { message: 'Need at least 2 players to start!' });
+            return;
+        }
         
         room.gameStarted = true;
         
@@ -177,7 +177,7 @@ io.on('connection', (socket) => {
         });
     });
     
-    // ===== PLAYER MOVEMENT UPDATE =====
+    // ===== PLAYER MOVEMENT =====
     socket.on('playerUpdate', (data) => {
         const roomCode = socket.currentRoom;
         const room = rooms.get(roomCode);
@@ -187,7 +187,6 @@ io.on('connection', (socket) => {
         const player = room.players.get(socket.id);
         if (!player || !player.alive) return;
         
-        // Update player state on server
         player.x = data.x;
         player.y = data.y;
         player.angle = data.angle;
@@ -195,7 +194,6 @@ io.on('connection', (socket) => {
         player.length = data.length;
         player.score = data.score;
         
-        // Broadcast to OTHER players in room (not sender)
         socket.to(roomCode).emit('playerMoved', {
             id: socket.id,
             x: data.x,
@@ -212,11 +210,10 @@ io.on('connection', (socket) => {
         const roomCode = socket.currentRoom;
         if (!roomCode) return;
         
-        // Broadcast to ALL players (including sender for confirmation)
         io.to(roomCode).emit('foodEaten', {
             foodIndex: data.foodIndex,
             eatenBy: socket.id,
-            newFood: data.newFood // New food position from client
+            newFood: data.newFood
         });
     });
     
@@ -228,13 +225,10 @@ io.on('connection', (socket) => {
         if (!room) return;
         
         const player = room.players.get(socket.id);
-        if (player) {
-            player.alive = false;
-        }
+        if (player) player.alive = false;
         
         console.log(`💀 ${player ? player.username : 'Player'} died in room ${roomCode}`);
         
-        // Notify all players
         io.to(roomCode).emit('playerDied', {
             id: socket.id,
             username: player ? player.username : 'Unknown',
@@ -244,12 +238,11 @@ io.on('connection', (socket) => {
         });
     });
     
-    // ===== POWERUP PICKED UP =====
+    // ===== POWERUP PICKUP =====
     socket.on('powerupPickup', (data) => {
         const roomCode = socket.currentRoom;
         if (!roomCode) return;
         
-        // Broadcast to all players to remove powerup
         io.to(roomCode).emit('powerupPickup', {
             powerupIndex: data.powerupIndex,
             pickedBy: socket.id
@@ -278,19 +271,10 @@ io.on('connection', (socket) => {
         });
     });
     
-    // ===== LEAVE ROOM =====
-    socket.on('leaveRoom', () => {
-        handlePlayerLeave(socket);
-    });
-    
     // ===== DISCONNECT =====
     socket.on('disconnect', () => {
         console.log(`❌ Player disconnected: ${socket.id}`);
-        handlePlayerLeave(socket);
-    });
-    
-    // Handle player leaving/disconnecting
-    function handlePlayerLeave(socket) {
+        
         const roomCode = socket.currentRoom;
         if (!roomCode) return;
         
@@ -304,7 +288,6 @@ io.on('connection', (socket) => {
         
         room.removePlayer(socket.id);
         
-        // Notify remaining players
         io.to(roomCode).emit('playerLeft', {
             id: socket.id,
             username: username,
@@ -312,7 +295,6 @@ io.on('connection', (socket) => {
             newHostId: room.hostId
         });
         
-        // Delete room if empty
         if (room.isEmpty()) {
             rooms.delete(roomCode);
             console.log(`🗑️  Room ${roomCode} deleted (empty)`);
@@ -320,13 +302,13 @@ io.on('connection', (socket) => {
         
         socket.leave(roomCode);
         socket.currentRoom = null;
-    }
+    });
 });
 
-// Clean up old/stale rooms every 5 minutes
+// Clean up old rooms every 5 minutes
 setInterval(() => {
     const now = Date.now();
-    const maxAge = 30 * 60 * 1000; // 30 minutes idle
+    const maxAge = 30 * 60 * 1000;
     
     rooms.forEach((room, code) => {
         if (room.isEmpty() || (!room.gameStarted && now - room.createdAt > maxAge)) {
@@ -336,7 +318,7 @@ setInterval(() => {
     });
 }, 5 * 60 * 1000);
 
-// Health check endpoint
+// Health check
 app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
